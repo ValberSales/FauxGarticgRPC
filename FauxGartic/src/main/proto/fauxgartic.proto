@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+option java_package = "org.fauxgartic.grpc"; // Onde as classes geradas vão ficar
+option java_multiple_files = true;
+
+service FauxGarticService {
+  rpc EntrarNoJogo (Jogador) returns (EstadoDoJogo);
+  rpc ReceberEventos (Jogador) returns (stream EventoDeJogo); // Stream do Server -> Client
+  rpc EnviarAcao (AcaoJogador) returns (Vazio);
+}
+
+// --- Mensagens ---
+message Jogador {
+  string nome = 1;
+}
+
+message EstadoDoJogo {
+  bool sou_o_desenhista = 1;
+  string desenhista_atual = 2;
+  string palavra_atual = 3;
+}
+
+message AcaoJogador {
+  Jogador jogador = 1;
+  oneof acao {
+    Traco traco = 2;
+    string palpite = 3;
+    bool limpar_tela = 4;
+  }
+}
+
+message Traco {
+  double x = 1;
+  double y = 2;
+  bool novo_traco = 3; // True = Clique inicial, False = Arrastando
+  string cor = 4;
+}
+
+message EventoDeJogo {
+  oneof evento {
+    Traco desenho = 1;
+    string mensagem_chat = 2;
+    Rodada mudanca_rodada = 3;
+    bool limpar_tela = 4;
+  }
+}
+
+message Rodada {
+  string nome_desenhista = 1;
+  string palavra_secreta = 2;
+}
+
+message Vazio {}
