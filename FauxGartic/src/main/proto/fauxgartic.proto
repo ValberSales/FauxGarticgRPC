@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-option java_package = "org.fauxgartic.grpc"; // Onde as classes geradas vão ficar
+option java_package = "org.fauxgartic.grpc";
 option java_multiple_files = true;
 
 service FauxGarticService {
   rpc EntrarNoJogo (Jogador) returns (EstadoDoJogo);
-  rpc ReceberEventos (Jogador) returns (stream EventoDeJogo); // Stream do Server -> Client
+  rpc ReceberEventos (Jogador) returns (stream EventoDeJogo);
   rpc EnviarAcao (AcaoJogador) returns (Vazio);
 }
 
@@ -32,7 +32,7 @@ message AcaoJogador {
 message Traco {
   double x = 1;
   double y = 2;
-  bool novo_traco = 3; // True = Clique inicial, False = Arrastando
+  bool novo_traco = 3;
   string cor = 4;
 }
 
