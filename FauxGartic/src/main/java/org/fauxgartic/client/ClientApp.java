@@ -16,8 +16,6 @@ import javafx.scene.paint.Color;
 import javafx.stage.Stage;
 import org.fauxgartic.grpc.*;
 
-import java.util.Optional;
-
 public class ClientApp extends Application {
 
     // GUI
@@ -27,6 +25,7 @@ public class ClientApp extends Application {
     private Label lblStatus = new Label("Conectando...");
 
     // Estado
+    private String serverIp; // Guarda o IP digitado
     private String meuNome;
     private boolean souDesenhista = false;
 
@@ -35,8 +34,13 @@ public class ClientApp extends Application {
 
     @Override
     public void start(Stage stage) {
+        // 1. Pede o IP do servidor (Novo passo)
+        serverIp = pedirIP();
+        if (serverIp == null || serverIp.trim().isEmpty()) return;
+
+        // 2. Pede o Nome
         meuNome = pedirNome();
-        if (meuNome == null) return;
+        if (meuNome == null || meuNome.trim().isEmpty()) return;
 
         // Layout
         BorderPane root = new BorderPane();
@@ -54,7 +58,7 @@ public class ClientApp extends Application {
         gc.setStroke(Color.BLACK);
         root.setCenter(canvas);
 
-        // Eventos de Mouse (Só envia se for desenhista)
+        // Eventos de Mouse
         canvas.setOnMousePressed(e -> {
             if (souDesenhista) {
                 desenharLocal(e.getX(), e.getY(), true);
@@ -77,36 +81,38 @@ public class ClientApp extends Application {
         root.setBottom(bottom);
 
         stage.setScene(new Scene(root, 800, 700));
-        stage.setTitle("FauxGartic - " + meuNome);
+        stage.setTitle("FauxGartic - " + meuNome + " (Conectado em " + serverIp + ")");
         stage.show();
 
         conectarAoServidor();
     }
 
     private void conectarAoServidor() {
-        // Conecta no Docker (localhost:50051)
-        ManagedChannel channel = ManagedChannelBuilder.forAddress("localhost", 50051)
+        // Usa o IP digitado na variável 'serverIp'
+        ManagedChannel channel = ManagedChannelBuilder.forAddress(serverIp, 50051)
                 .usePlaintext()
                 .build();
 
         var blockingStub = FauxGarticServiceGrpc.newBlockingStub(channel);
         asyncStub = FauxGarticServiceGrpc.newStub(channel);
 
-        // Thread separada para não travar a GUI
         new Thread(() -> {
             try {
-                // 1. Entra no Jogo
+                // Entra no Jogo
                 Jogador eu = Jogador.newBuilder().setNome(meuNome).build();
                 EstadoDoJogo estado = blockingStub.entrarNoJogo(eu);
 
                 Platform.runLater(() -> atualizarEstado(estado.getSouODesenhista(), estado.getDesenhistaAtual(), estado.getPalavraAtual()));
 
-                // 2. Escuta eventos (Stream)
+                // Escuta eventos
                 blockingStub.receberEventos(eu).forEachRemaining(evento -> {
                     Platform.runLater(() -> processarEvento(evento));
                 });
             } catch (Exception e) {
-                Platform.runLater(() -> chatArea.appendText("ERRO: Não foi possível conectar ao servidor.\n"));
+                Platform.runLater(() -> {
+                    chatArea.appendText("ERRO FATAL: Não foi possível conectar em " + serverIp + "\n");
+                    lblStatus.setText("Desconectado.");
+                });
             }
         }).start();
     }
@@ -173,8 +179,19 @@ public class ClientApp extends Application {
         else { gc.lineTo(x, y); gc.stroke(); }
     }
 
+    // --- DIÁLOGOS ---
+
+    private String pedirIP() {
+        TextInputDialog dialog = new TextInputDialog("localhost"); // Valor padrão
+        dialog.setTitle("Conexão");
+        dialog.setHeaderText("Configuração de Rede");
+        dialog.setContentText("Digite o IP do servidor:");
+        return dialog.showAndWait().orElse(null);
+    }
+
     private String pedirNome() {
         TextInputDialog dialog = new TextInputDialog("Jogador");
+        dialog.setTitle("Login");
         dialog.setHeaderText("Bem-vindo ao FauxGartic");
         dialog.setContentText("Seu nome:");
         return dialog.showAndWait().orElse(null);
