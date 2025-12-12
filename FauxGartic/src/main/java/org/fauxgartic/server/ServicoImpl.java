@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ServicoImpl extends FauxGarticServiceGrpc.FauxGarticServiceImplBase {
 
     // Dados do jogo
-    private final List<String> palavras = Arrays.asList("Gato", "Sol", "Casa", "Arvore", "Carro", "Computador", "Pizza");
+    private final List<String> palavras = Arrays.asList("Gato", "Sol", "Casa", "Arvore", "Carro", "Computador", "Pizza", "Aviao", "Banana", "Bola");
     private final List<String> filaJogadores = Collections.synchronizedList(new ArrayList<>());
     private final Map<String, StreamObserver<EventoDeJogo>> clientes = new ConcurrentHashMap<>();
 
@@ -22,6 +22,11 @@ public class ServicoImpl extends FauxGarticServiceGrpc.FauxGarticServiceImplBase
     @Override
     public void entrarNoJogo(Jogador request, StreamObserver<EstadoDoJogo> responseObserver) {
         String nome = request.getNome();
+
+        // Evita nomes duplicados desconectando o anterior se houver
+        if (clientes.containsKey(nome)) {
+            removerJogador(nome);
+        }
 
         // Adiciona na fila se não existir
         synchronized (filaJogadores) {
@@ -43,7 +48,7 @@ public class ServicoImpl extends FauxGarticServiceGrpc.FauxGarticServiceImplBase
                 .build();
 
         responseObserver.onNext(estado);
-        responseObserver.onCompleted();
+        responseObserver.onCompleted(); // O entrar é uma chamada unária, fecha logo.
 
         broadcastChat("SERVER", nome + " entrou na sala!");
     }
@@ -52,11 +57,19 @@ public class ServicoImpl extends FauxGarticServiceGrpc.FauxGarticServiceImplBase
     public void receberEventos(Jogador request, StreamObserver<EventoDeJogo> responseObserver) {
         // Guarda a conexão para enviar eventos depois
         clientes.put(request.getNome(), responseObserver);
+        System.out.println("Stream registrado para: " + request.getNome());
     }
 
     @Override
     public void enviarAcao(AcaoJogador request, StreamObserver<Vazio> responseObserver) {
         String autor = request.getJogador().getNome();
+
+        // Verifica se o cliente ainda está conectado na nossa lista, senão ignora
+        if (!clientes.containsKey(autor)) {
+            responseObserver.onNext(Vazio.newBuilder().build());
+            responseObserver.onCompleted();
+            return;
+        }
 
         // 1. Desenho
         if (request.hasTraco() && autor.equals(desenhistaAtual)) {
@@ -86,6 +99,11 @@ public class ServicoImpl extends FauxGarticServiceGrpc.FauxGarticServiceImplBase
 
         synchronized (filaJogadores) {
             if (filaJogadores.isEmpty()) return;
+
+            // Remove jogadores fantasmas da fila antes de sortear
+            filaJogadores.removeIf(p -> !clientes.containsKey(p));
+            if (filaJogadores.isEmpty()) return;
+
             int index = filaJogadores.indexOf(desenhistaAtual);
             int proximo = (index + 1) % filaJogadores.size();
             desenhistaAtual = filaJogadores.get(proximo);
@@ -95,6 +113,28 @@ public class ServicoImpl extends FauxGarticServiceGrpc.FauxGarticServiceImplBase
         broadcastEvento(EventoDeJogo.newBuilder().setMudancaRodada(r).build());
         broadcastEvento(EventoDeJogo.newBuilder().setLimparTela(true).build());
         broadcastChat("SERVER", "--- Nova Rodada! Desenhista: " + desenhistaAtual + " ---");
+    }
+
+    private void removerJogador(String nome) {
+        // Remove do mapa de conexões
+        StreamObserver<EventoDeJogo> removido = clientes.remove(nome);
+
+        if (removido != null) {
+            System.out.println("Jogador desconectado detectado: " + nome);
+
+            // Remove da fila circular
+            synchronized (filaJogadores) {
+                filaJogadores.remove(nome);
+            }
+
+            broadcastChat("SERVER", nome + " saiu do jogo.");
+
+            // Se quem saiu era o desenhista, passa a vez imediatamente
+            if (nome.equals(desenhistaAtual)) {
+                broadcastChat("SERVER", "O desenhista saiu! Passando a vez...");
+                proximaRodada();
+            }
+        }
     }
 
     private void sortearPalavra() {
@@ -107,11 +147,16 @@ public class ServicoImpl extends FauxGarticServiceGrpc.FauxGarticServiceImplBase
     }
 
     private void broadcastEvento(EventoDeJogo evt) {
-        for (StreamObserver<EventoDeJogo> obs : clientes.values()) {
+        for (Map.Entry<String, StreamObserver<EventoDeJogo>> entry : clientes.entrySet()) {
+            String nome = entry.getKey();
+            StreamObserver<EventoDeJogo> obs = entry.getValue();
+
             try {
                 // Sincronizado para evitar envio simultâneo na mesma stream
                 synchronized (obs) { obs.onNext(evt); }
-            } catch (Exception e) { /* Cliente caiu */ }
+            } catch (Exception e) {
+                removerJogador(nome);
+            }
         }
     }
 }
